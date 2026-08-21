@@ -60,7 +60,7 @@ class Region(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.name}, {self.country.iso_alpha2}"
+        return f"{self.name}, {self.country.iso_code}"
 
 
 class SettlementType(models.Model):
@@ -219,6 +219,18 @@ class Address(models.Model):
     @property
     def coordinates(self) -> tuple[Decimal, Decimal]:
         return self.longitude, self.latitude
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "street",
+                    "house_number",
+                    "building_name",
+                ],
+                name="unique_address_per_street",
+            ),
+        ]
 
     def __str__(self):
         parts = [
