@@ -313,7 +313,7 @@ class Floor(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.building} — floor {self.number}"
+        return f"{self.building.name} — floor {self.label}"
 
 
 class UnitType(models.Model):
@@ -339,7 +339,6 @@ class Unit(models.Model):
         on_delete=models.PROTECT,
         related_name="units"
     )
-    image = models.ImageField()
 
     # add in future
     # image = review = models.ForeignKey(to=UnitImage, on_delete=models.CASCADE, related_name="units")

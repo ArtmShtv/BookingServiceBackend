@@ -24,7 +24,10 @@ from address.models import (
     Street,
     Address,
     BuildingType,
-    Building
+    Building,
+    Floor,
+    UnitType,
+    Unit,
 )
 
 
@@ -139,7 +142,7 @@ class CountryAPIView(APIView):
 
 
 class CountryDetailAPIView(APIView):
-    SAFE_METHODS = ["PATCH", "DELETE"]
+    SAFE_METHODS = ("GET")
 
     def get_permissions(self):
         if self.request.method in self.SAFE_METHODS:
@@ -168,7 +171,6 @@ class CountryDetailAPIView(APIView):
         description="Update (Patch) country by its pk",
         tags=["Countries"],
     )
-    @permission_classes([IsAdminUser])
     def patch(self, request, country_id):
         country = get_object_or_404(Country, id=country_id)
 
@@ -189,7 +191,6 @@ class CountryDetailAPIView(APIView):
         description="Delete country by its pk",
         tags=["Countries"],
     )
-    @permission_classes([IsAdminUser])
     def delete(self, request, country_id: int):
         country = get_object_or_404(Country, pk=country_id)
 
@@ -604,7 +605,6 @@ class SettlementDetailAPIView(APIView):
         serializer.save()
         return Response(status=status.HTTP_200_OK)
 
-    
 
 class DistrictAPIView(APIView):
     SAFE_METHODS = ["GET"]
@@ -1219,11 +1219,11 @@ class BuildingTypesAPIView(APIView):
         serializer = self.InputDeleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        BuildingType.objects.filter(id__in=serializer.validated_data["settlement_types_id"]).delete()
+        BuildingType.objects.filter(id__in=serializer.validated_data["building_types_id"]).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class BuildingTypeDetailAPIView(APIView):
+class BuildingTypesDetailAPIView(APIView):
     SAFE_METHODS = ["GET"]
 
     def get_permissions(self):
@@ -1234,7 +1234,7 @@ class BuildingTypeDetailAPIView(APIView):
 
     class InputUpdateSerializer(serializers.ModelSerializer):
         class Meta:
-            model = Region
+            model = BuildingType
             fields = ["name"]
 
     def patch(self, request, settlement_type_id: int):
@@ -1244,3 +1244,455 @@ class BuildingTypeDetailAPIView(APIView):
         serializer.is_valid()
         serializer.save()
         return Response(status=status.HTTP_200_OK)
+
+
+class BuildingAPIView(APIView):
+    SAFE_METHODS = ("GET")
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+    class OutputGetSerializer(serializers.ModelSerializer):
+        address = serializers.SerializerMethodField()
+        building_type = serializers.SerializerMethodField()
+
+        class Meta:
+            model = Building
+            fields = ["id", "address", "building_type", "name", "code"]
+
+        def get_address(self, obj):
+            return obj.address
+
+        def get_building_type(self, obj):
+            return obj.building_type.name
+
+
+    def get(self, request, address_id:int):
+        address = get_object_or_404(Address, id=address_id)
+        building = get_object_or_404(Building, address=address)
+        serializer = self.OutputGetSerializer(building)
+
+
+    class InputCreateSerializer(serializers.Serializer):
+        class BuildingSerializer(serializers.Serializer):
+            building_type = serializers.PrimaryKeyRelatedField(
+                queryset = BuildingType.objects.all()
+            )
+            name = serializers.CharField()
+            code = serializers.CharField()
+
+        buildings = BuildingSerializer(
+            many=True,
+            allow_empty=False
+        )
+
+    def post(self, request, address_id:int):
+        address = get_object_or_404(Address, id=address_id)
+
+        input_serializer = self.InputCreateSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        buildings_data = input_serializer.validated_data["buildings"]
+
+        existing_buildings_codes = set(
+            Building.objects.filter(address=address).values_list("code", flat=True)
+        )
+        seet_codes = set()
+        to_create = []
+
+        for building in buildings_data:
+            name = building["name"]
+            code = building["code"]
+            building_type = building["building_type"]
+
+            if (code not in existing_buildings_codes and
+                code not in seet_codes):
+                to_create.append(Building(
+                    address = address,
+                    building_type = building_type,
+                    name=name,
+                    code=code
+                ))
+                seet_codes.add(code)
+
+        with transaction.atomic():
+            Building.objects.bulk_create(to_create)
+
+        return Response({
+            "created_count": len(to_create)
+        }, status=status.HTTP_201_CREATED)
+
+
+    class InputDeleteSerializer(serializers.Serializer):
+        buildings_id = serializers.ListField(
+            child=serializers.IntegerField()
+        )
+
+    def delete(self, request, address_id:int):
+        input_serializer = self.InputDeleteSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        Building.objects.filter(id__in=input_serializer["buildings_id"]).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class BuildingDetailAPIView(APIView):
+    SAFE_METHODS = ("GET")
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
+    class InputUpdateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Building
+            fields = ["address", "building_type", "name", "code"]
+
+    def patch(self, request, building_id:int):
+        building = get_object_or_404(Building, id=building_id)
+
+        input_serializer = self.InputUpdateSerializer(
+            building,
+            data=request.data, 
+            partial=True
+        )
+        input_serializer.is_valid()
+        input_serializer.save()
+
+        return Response(
+            {
+                "updated_data": input_serializer.data
+            }, 
+            status=status.HTTP_200_OK
+        )
+
+
+class FloorAPIView(APIView):
+    SAFE_METHODS = ["GET"]
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+    class OutputListSerializer(serializers.ModelSerializer):
+        building_name = serializers.CharField(
+            source="building.name",
+            read_only=True,
+        )
+
+        class Meta:
+            model = Floor
+            fields = [
+                "id",
+                "building",
+                "building_name",
+                "label",
+            ]
+
+    def get(self, request, building_id:int):
+        building = get_object_or_404(Building, id=building_id)
+
+        floors = (
+            Floor.objects
+            .filter(building=building)
+            .select_related("building")
+        )
+
+        output_serializer = self.OutputListSerializer(floors, many=True)
+
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
+    class InputCreateSerializer(serializers.Serializer):
+        floor_labels = serializers.ListField(
+            child = serializers.CharField()
+        )
+
+    def post(self, request, building_id:int):
+        building = get_object_or_404(Building, id=building_id)
+
+        input_serializer = self.InputCreateSerializer(data=request.data)
+        input_serializer.is_valid()
+
+        existing_floors_in_building = set(
+            Floor.objects.filter(building=building).values_list("label", flat=True)
+        )
+        floor_labels = input_serializer.validated_data["floor_labels"]
+        seen_labels = set()
+        to_create = []
+
+        for label in floor_labels:
+            if (label not in existing_floors_in_building and
+                label not in seen_labels):
+                to_create.append(Floor(building=building, label=label))
+                seen_labels.add(label)
+
+        with transaction.atomic():
+            Floor.objects.bulk_create(to_create)
+
+        return Response(
+            {
+            "created_count": len(to_create)
+            }, 
+            status=status.HTTP_201_CREATED
+        )
+
+    class InputDeleteSerializer(serializers.Serializer):
+        floors_id = serializers.ListField(
+            child = serializers.IntegerField()
+        )
+
+    def delete(self, request):
+        input_serializer = self.InputDeleteSerializer(data=request.data)
+        input_serializer.is_valid()
+
+        Floor.objects.filter(id__in=input_serializer.validated_data["floors_id"]).delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class FloorDetailAPIView(APIView):
+    SAFE_METHODS = ["GET"]
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
+    class InputUpdateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Floor
+            fields = ["building", "label"]
+
+    def patch(self, request, floor_id:int):
+        floor = get_object_or_404(Floor, id=floor_id)
+
+        input_serializer = self.InputUpdateSerializer(
+            floor, 
+            data=request.data,
+            partial=True
+        )
+        input_serializer.is_valid()
+        input_serializer.save()
+
+        return Response(
+            {
+                "updated_data": input_serializer.data
+            }, 
+            status=status.HTTP_200_OK
+        )
+
+
+class UnitTypesAPIView(APIView):
+    SAFE_METHODS = ["GET"]
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
+    class OutputListSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Settlement
+            fields = ["id", "name"]
+
+    def get(self, request):
+        unit_types = UnitType.objects.all()
+        output_serializer = self.OutputListSerializer(unit_types, many=True)
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
+    class InputCreateSerializer(serializers.Serializer):
+        unit_types = serializers.ListField(
+            child=serializers.CharField()
+        )
+
+    def post(self, request):
+        input_serializer = self.InputCreateSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        unit_types_data = input_serializer.validated_data["unit_types"]
+
+        existing_unit_types = set(
+            UnitType.objects.all().values_list("name", flat=True)
+        )
+        seen_names = set()
+        to_create = []
+
+        for name in unit_types_data:
+            if name not in existing_unit_types:
+                to_create.append(UnitType(name=name))
+                seen_names.add(name)
+
+        with transaction.atomic():
+            UnitType.objects.bulk_create(to_create)
+
+        return Response({"created_count": len(to_create)}, status=status.HTTP_201_CREATED)
+
+
+    class InputDeleteSerializer(serializers.Serializer):
+        unit_types_id = serializers.ListField()
+
+    def delete(self, request):
+        serializer = self.InputDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        UnitType.objects.filter(id__in=serializer.validated_data["unit_types_id"]).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UnitTypeDetailAPIView(APIView):
+    SAFE_METHODS = ["GET"]
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
+    class InputUpdateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = UnitType
+            fields = ["name"]
+
+    def patch(self, request, settlement_type_id: int):
+        unit_type = get_object_or_404(UnitType, id=settlement_type_id)
+
+        serializer = self.InputUpdateSerializer(unit_type, data=request.data, partial=True)
+        serializer.is_valid()
+        serializer.save()
+        return Response(status=status.HTTP_200_OK)
+
+
+class UnitAPIView(APIView):
+    SAFE_METHODS = ["GET"]
+
+    def get_permissions(self):
+        if self.request.method not in self.SAFE_METHODS:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
+    class OutputListSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Unit
+            fields = "__all__"
+
+    def get(self, request, floor_id:int):
+        units = (
+            Unit
+            .objects
+            .filter(floor=floor_id)
+            .prefetch_related("floor", "floor__building")
+        )
+
+        output_serializer = self.OutputListSerializer(units, many=True)
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+
+    class InputCreateSerializer(serializers.Serializer):
+        class UnitSerializer(serializers.Serializer):
+            unit_type = serializers.PrimaryKeyRelatedField(
+                queryset=UnitType.objects.all()
+            )
+            label = serializers.CharField()
+
+        units = UnitSerializer(many=True, allow_empty=False)
+
+    def post(self, request, floor_id:int):
+        floor = get_object_or_404(Floor, id=floor_id)
+
+        input_serializer = self.InputCreateSerializer(data=request.data)
+        input_serializer.is_valid()
+
+        existing_labels_on_floor = set(
+            Unit
+            .objects
+            .filter(floor=floor)
+            .values_list("label", flat=True)
+        )
+        units_data = input_serializer.validated_data["units"]
+        seen_labels = set()
+        to_create = []
+
+        for unit in units_data:
+            label = unit["label"]
+            unit_type = unit["unit_type"]
+
+            if (
+                label not in existing_labels_on_floor and
+                label not in seen_labels
+            ):
+                to_create.append(
+                    Unit(
+                        label = label,
+                        floor = floor,
+                        unit_type = unit_type
+                    )
+                )
+                seen_labels.add(label)
+
+        with transaction.atomic():
+            Unit.objects.bulk_create(to_create)
+
+        return Response(
+            {
+                "created_count": len(to_create)
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+    class InputDeleteSerializer(serializers.Serializer):
+        units_id = serializers.ListField(
+            child = serializers.IntegerField()
+        )
+
+    def delete(self, request, floor_id:int):
+        input_serializer = self.InputDeleteSerializer(data=request.data)
+        input_serializer.is_valid()
+
+        units_id = input_serializer.validated_data["units_id"]
+        Unit.objects.filter(id__in=units_id).delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UnitDetailAPIView(APIView):
+    class InputUpdateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Unit
+            fields = [
+                "label",
+                "floor",
+                "unit_type",
+            ]
+
+    def patch(self, request, unit_id: int):
+        unit = get_object_or_404(Unit, id=unit_id)
+
+        serializer = self.InputUpdateSerializer(
+            unit,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+
+        updated_unit = serializer.save()
+
+        return Response(
+            {
+                "id": updated_unit.id,
+                "label": updated_unit.label,
+                "floor": updated_unit.floor_id,
+                "unit_type": updated_unit.unit_type_id,
+            },
+            status=status.HTTP_200_OK,
+        )
+
