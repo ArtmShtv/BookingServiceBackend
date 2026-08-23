@@ -1,11 +1,9 @@
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from django.core.exceptions import ValidationError
 
 from rest_framework import serializers, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import permission_classes
 from rest_framework.permissions import IsAdminUser, AllowAny
 
 from drf_spectacular.utils import (
@@ -1489,7 +1487,7 @@ class FloorDetailAPIView(APIView):
         )
 
 
-class UnitTypesAPIView(APIView):
+class UnitTypeAPIView(APIView):
     SAFE_METHODS = ["GET"]
 
     def get_permissions(self):

@@ -341,7 +341,6 @@ class Unit(models.Model):
     )
 
     # add in future
-    # image = review = models.ForeignKey(to=UnitImage, on_delete=models.CASCADE, related_name="units")
     # review = models.ForeignKey(to=Review, on_delete=models.CASCADE, related_name="units")
     # schedule = models.ForeignKey(to=Schedule, on_delete=models.CASCADE, related_name="units")
 

@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
 
     "address",
+    "booking",
     "user",
 
     "drf_spectacular",

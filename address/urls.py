@@ -100,4 +100,46 @@ urlpatterns = [
         views.BuildingTypesDetailAPIView.as_view(),
         name="building-types-detail"
     ),
+    path(
+        "building/",
+        views.BuildingAPIView.as_view(),
+        name="building"
+    ),
+    path(
+        "building/<int:building_id>/",
+        views.BuildingDetailAPIView.as_view(),
+        name="building-detail"
+    ),
+    # Floor endpoints
+    path(
+        "floor/",
+        views.FloorAPIView.as_view(),
+        name="floor"
+    ),
+    path(
+        "floor/<int:floor_id>/",
+        views.FloorDetailAPIView.as_view(),
+        name="floor-detail"
+    ),
+    # Unit endpoints
+    path(
+        "unit/types/",
+        views.UnitTypeAPIView.as_view(),
+        name="unit-type"
+    ),
+    path(
+        "unit/types/<int:unit_type_id>/",
+        views.UnitTypeDetailAPIView.as_view(),
+        name="unit-type-detail"
+    ),
+    path(
+        "unit/",
+        views.UnitAPIView.as_view(),
+        name="unit"
+    ),
+    path(
+        "unit/<int:unit_id>/",
+        views.UnitDetailAPIView.as_view(),
+        name="unit-detail"
+    ),
 ]
