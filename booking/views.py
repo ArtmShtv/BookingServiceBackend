@@ -1,12 +1,15 @@
-from django.shortcuts import render
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+from django.db import transaction, IntegrityError
+from django.contrib.auth import get_user_model
 
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAdminUser, AllowAny
+from rest_framework.permissions import IsAdminUser, AllowAny, IsAuthenticated
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
+
+from datetime import date as date_type
 
 from address.models import Unit
 from booking.models import (
@@ -18,8 +21,13 @@ from booking.services import (
     get_existing_day_schedule_for_unit,
     has_overlapping_intervals
 )
+from booking.tasks import(
+    send_email
+)
 
 from datetime import time
+
+User = get_user_model()
 
 
 class UnitDetailScheduleAPIView(APIView):
@@ -33,11 +41,11 @@ class UnitDetailScheduleAPIView(APIView):
     class OutputListSerializer(serializers.ModelSerializer):
         class Meta:
             model = UnitSchedule
-            fields = ["unit", "date", "start_time", "end_time",
-                      "is_active", "recurrence", "updated_at"]
+            fields = ["unit", "date", "start_time", 
+                      "end_time","recurrence", "updated_at"]
 
 
-    def get(self, request, unit_id:int):
+    def get(self, request, unit_id:int, date):
         unit = get_object_or_404(Unit, id=unit_id)
         unit_schedule = UnitSchedule.objects.filter(unit=unit)
 
@@ -94,12 +102,18 @@ class UnitDetailScheduleAPIView(APIView):
         )
 
     def post(self, request, unit_id:int, date):
-        unit = get_object_or_404(id=unit_id)
+        try:
+            date = date_type.fromisoformat(date)
+        except ValueError:
+            raise ValidationError({
+                "date": "Expected format: YYYY-MM-DD."
+            })
+        unit = get_object_or_404(Unit, id=unit_id)
 
         input_serializer = self.InputCreateSerializer(data=request.data)
         input_serializer.is_valid()
 
-        new_unit_schedules = input_serializer["unit_schedule"] 
+        new_unit_schedules = input_serializer.validated_data["unit_schedules"] 
 
         existing_unit_schedule_intervals = get_existing_day_schedule_for_unit(unit, date)
 
@@ -157,8 +171,89 @@ class UnitDetailScheduleAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class BookingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
 
+    class OutputGetListSerializer(serializers.ModelSerializer):
+        date = serializers.DateField(
+            source="unit_schedule.date",
+            read_only=True,
+        )
+        interval = serializers.SerializerMethodField()
+
+        class Meta:
+            model = Booking
+            fields = [
+                "id",
+                "date",
+                "interval",
+                "status",
+                "notes",
+                "created_at",
+            ]
+
+        def get_interval(self, obj):
+            return (
+                f"{obj.unit_schedule.start_time}"
+                f"-{obj.unit_schedule.end_time}"
+            )
+
+    def get(self, request, schedule_id):
+        user = request.user
+
+        bookings = (
+            Booking.objects
+            .filter(user=request.user)
+            .select_related("unit_schedule")
+            .order_by(
+                "unit_schedule__date",
+                "unit_schedule__start_time",
+            )
+        )
+
+        output_serializer = self.OutputGetListSerializer(bookings, many=True)
+
+        return Response(
+            output_serializer.data,
+            status=status.HTTP_200_OK
+        )
 
 
+    class InputCreateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = Booking
+            fields = ["notes"]
 
+    def post(self, request, schedule_id: int):
+        user = request.user
+        unit_schedule = get_object_or_404(UnitSchedule, id=schedule_id)
+
+        input_serializer = self.InputCreateSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        notes = input_serializer.validated_data.get("notes", "")
+        send_email.delay(
+            user_id=user.id,
+            unit_schedule_id=unit_schedule.id,
+            notes=notes,
+        )
+        try:
+            with transaction.atomic():
+                Booking.objects.create(
+                    unit_schedule=unit_schedule,
+                    user=request.user,
+                    notes=notes,
+                )
+        except IntegrityError:
+            return Response(
+                {"message": "This schedule is already booked"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        
+
+        return Response(
+            {"message": f"Unit booked for {unit_schedule.date} {unit_schedule.start_time}-{unit_schedule.end_time}"},
+            status=status.HTTP_200_OK,
+        )

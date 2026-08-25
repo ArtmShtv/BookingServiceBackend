@@ -1069,13 +1069,22 @@ class AdressAPIView(APIView):
         )
 
         addresses_data = serializer.validated_data["addresses"]
+
+        existing_building_names = set(
+            Address.objects
+            .filter(street=street)
+            .values_list("building_name", flat=True)
+        )
+        seen_building_names = set()
         to_create = []
+        
 
         for address_data in addresses_data:
             country = address_data["country"]
             region = address_data["region"]
             settlement = address_data["settlement"]
             district = address_data["district"]
+            building_name = address_data["building_name"].strip()
 
             if region.country_id != country.id:
                 continue
@@ -1089,20 +1098,25 @@ class AdressAPIView(APIView):
             if street.district_id != district.id:
                 continue
 
-            to_create.append(
-                Address(
-                    country=country,
-                    region=region,
-                    settlement=settlement,
-                    district=district,
-                    street=street,
-                    house_number=address_data["house_number"].strip(),
-                    building_name=address_data["building_name"].strip(),
-                    postal_code=address_data["postal_code"].strip(),
-                    longitude=address_data["longitude"],
-                    latitude=address_data["latitude"],
+            if (
+                building_name not in existing_building_names and
+                building_name not in seen_building_names
+            ):
+                to_create.append(
+                    Address(
+                        country=country,
+                        region=region,
+                        settlement=settlement,
+                        district=district,
+                        street=street,
+                        house_number=address_data["house_number"].strip(),
+                        building_name=address_data["building_name"].strip(),
+                        postal_code=address_data["postal_code"].strip(),
+                        longitude=address_data["longitude"],
+                        latitude=address_data["latitude"],
+                    )
                 )
-            )
+                seen_building_names.add(building_name)
 
         with transaction.atomic():
             Address.objects.bulk_create(to_create)

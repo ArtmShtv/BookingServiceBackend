@@ -101,7 +101,7 @@ urlpatterns = [
         name="building-types-detail"
     ),
     path(
-        "building/",
+        "<int:address_id>/building/",
         views.BuildingAPIView.as_view(),
         name="building"
     ),
@@ -112,7 +112,7 @@ urlpatterns = [
     ),
     # Floor endpoints
     path(
-        "floor/",
+        "building/<int:building_id>/floor/",
         views.FloorAPIView.as_view(),
         name="floor"
     ),
@@ -133,7 +133,7 @@ urlpatterns = [
         name="unit-type-detail"
     ),
     path(
-        "unit/",
+        "floor/<int:floor_id>/unit/",
         views.UnitAPIView.as_view(),
         name="unit"
     ),

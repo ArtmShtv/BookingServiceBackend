@@ -64,7 +64,7 @@ class Booking(models.Model):
         on_delete=models.CASCADE,
         related_name="bookings",
     )
-    unit_schedule = models.ForeignKey(
+    unit_schedule = models.OneToOneField(
         UnitSchedule,
         on_delete=models.CASCADE,
         related_name="bookings",
