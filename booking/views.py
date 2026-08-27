@@ -51,6 +51,7 @@ class UnitScheduleAPIView(APIView):
         class Meta:
             model = UnitSchedule
             fields = [
+                "id",
                 "unit", 
                 "date", 
                 "start_time", 
@@ -129,11 +130,7 @@ class UnitScheduleAPIView(APIView):
     )
     def get(self, request, unit_id: int):
         unit = get_object_or_404(Unit, id=unit_id)
-
-        unit_schedules = UnitSchedule.objects.filter(
-            unit=unit,
-        ).order_by("date", "start_time")
-
+        unit_schedules = UnitSchedule.objects.filter(unit=unit).order_by("date", "start_time")
         date = request.query_params.get("date")
 
         if date:
@@ -302,23 +299,27 @@ class UnitScheduleAPIView(APIView):
             ),
         ],
     )
-    def post(self, request, unit_id:int, date):
+    def post(self, request, unit_id:int):
+        date_value = request.query_params.get("date")
+
+        if not date_value:
+            raise ValidationError({
+                "date": "This query parameter is required."
+            })
+
         try:
-            date = date_type.fromisoformat(date)
+            date = date_type.fromisoformat(date_value)
         except ValueError:
             raise ValidationError({
                 "date": "Expected format: YYYY-MM-DD."
             })
+        
         unit = get_object_or_404(Unit, id=unit_id)
 
         input_serializer = self.InputCreateSerializer(data=request.data)
         input_serializer.is_valid()
 
         new_unit_schedules = input_serializer.validated_data["unit_schedules"] 
-
-        existing_unit_schedule_intervals = get_existing_day_schedule_for_unit(unit, date)
-
-        
         new_unit_schedule_intervals = sorted(
             [(s["start_time"], s["end_time"]) for s in new_unit_schedules],
             key=lambda x: x[0]
@@ -328,6 +329,9 @@ class UnitScheduleAPIView(APIView):
                 {"detail": "New schedules overlap with each other"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        existing_unit_schedule_intervals = get_existing_day_schedule_for_unit(unit, date)
+
 
         to_create = []
         for schedule in new_unit_schedules:
@@ -543,14 +547,10 @@ class BookingAPIView(APIView):
         )
 
 
-class BookingDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-
     class InputCreateSerializer(serializers.ModelSerializer):
         class Meta:
             model = Booking
-            fields = ["notes"]
+            fields = ["unit_schedule", "notes"]
 
     @extend_schema(
         operation_id="create_booking",
@@ -643,50 +643,46 @@ class BookingDetailAPIView(APIView):
             ),
         ],
     )
-    def post(self, request, schedule_id: int):
-        user = request.user
-        unit_schedule = get_object_or_404(
-            UnitSchedule,
-            id=schedule_id,
-        )
-
+    def post(self, request):
         input_serializer = self.InputCreateSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
 
-        notes = input_serializer.validated_data.get("notes", "")
+        user = request.user
+        unit_schedule = input_serializer.validated_data["unit_schedule"]
 
-        try:
-            with transaction.atomic():
-                booking = Booking.objects.create(
-                    unit_schedule=unit_schedule,
-                    user=user,
-                    notes=notes,
-                )
-
-                transaction.on_commit(
-                    lambda: send_confirm_email.delay(
-                        user_id=user.id,
-                        unit_schedule_id=unit_schedule.id,
-                        notes=notes,
-                    )
-                )
-
-        except IntegrityError:
+        if Booking.objects.filter(unit_schedule=unit_schedule, status="confirmed").exists():
             return Response(
                 {"detail": "This schedule is already booked."},
                 status=status.HTTP_409_CONFLICT,
             )
 
+        notes = input_serializer.validated_data.get("notes", "")
+
+        with transaction.atomic():
+            booking = Booking.objects.create(
+                unit_schedule=unit_schedule,
+                user=user,
+                notes=notes,
+            )
+            transaction.on_commit(
+                lambda: send_confirm_email.delay(
+                    user_id=user.id,
+                    unit_schedule_id=unit_schedule.id,
+                    notes=notes,
+                )
+            )
+
         return Response(
             {
                 "id": booking.id,
-                "message": (
-                    f"Unit booked for {unit_schedule.date} "
-                    f"{unit_schedule.start_time}-{unit_schedule.end_time}"
-                ),
+                "message": f"Unit booked for {unit_schedule.date} {unit_schedule.start_time}-{unit_schedule.end_time}",
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class BookingDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
 
     @extend_schema(

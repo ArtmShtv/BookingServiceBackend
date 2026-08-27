@@ -12,15 +12,13 @@ class UnitSchedule(models.Model):
         ONCE = "once", "Once"
         DAILY = "daily", "Daily"
         WEEKLY = "weekly", "Weekly"
-        MONTHLY = "monthly", "Monthly"
-        YEARLY = "yearly", "Yearly"
 
     unit = models.ForeignKey(
         Unit,
         on_delete=models.CASCADE,
         related_name="schedules",
     )
-
+    
     date = models.DateField(
         null=True,
         blank=True,

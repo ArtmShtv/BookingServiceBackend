@@ -13,7 +13,7 @@ urlpatterns = [
         name="unit-schedules",
     ),
     path(
-        "booking/unit_schedules/<int:schedule_id>/",
+        "unit_schedules/",
         BookingAPIView.as_view(),
         name="booking"
     )

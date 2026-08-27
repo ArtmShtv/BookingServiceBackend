@@ -1,7 +1,5 @@
-from datetime import datetime, date, time
-from typing import List, Tuple
-
-from django.db.models import QuerySet
+from datetime import time
+from datetime import date as date_type
 
 from address.models import Unit
 from booking.models import UnitSchedule
@@ -9,25 +7,39 @@ from booking.models import UnitSchedule
 
 def get_existing_day_schedule_for_unit(
     unit: Unit,
-    date: date,
+    schedule_date: date_type,
 ) -> list[tuple[time, time]]:
     unit_schedules = (
         UnitSchedule.objects.filter(
             unit=unit,
-            date=date,
             is_active=True,
         )
         .order_by("start_time")
     )
 
-    res = []
+    intervals: list[tuple[time, time]] = []
+
     for schedule in unit_schedules:
-        start_time = schedule.start_time
-        end_time = schedule.end_time
+        if schedule.recurrence == UnitSchedule.RecurrenceStatus.ONCE:
+            if schedule.date != schedule_date:
+                continue
 
-        res.append((start_time, end_time))
+        elif schedule.recurrence == UnitSchedule.RecurrenceStatus.DAILY:
+            if schedule_date < schedule.date:
+                continue
 
-    return res
+        elif schedule.recurrence == UnitSchedule.RecurrenceStatus.WEEKLY:
+            if schedule_date < schedule.date:
+                continue
+
+            if schedule.date.weekday() != schedule_date.weekday():
+                continue
+
+        intervals.append(
+            (schedule.start_time, schedule.end_time)
+        )
+
+    return intervals
 
 
 def has_overlapping_intervals(intervals: list[tuple[time, time]]) -> bool:
