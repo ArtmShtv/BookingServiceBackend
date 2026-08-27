@@ -3,6 +3,7 @@ from django.db import models
 from address.models import Unit
 
 from django.contrib.auth import get_user_model
+from django.core.validators import MaxValueValidator, MinValueValidator
 
 User = get_user_model()
 
@@ -18,11 +19,10 @@ class UnitSchedule(models.Model):
         on_delete=models.CASCADE,
         related_name="schedules",
     )
-    
+
     date = models.DateField(
         null=True,
         blank=True,
-        help_text="Specific date / null for recurring templates",
     )
     start_time = models.TimeField()
     end_time = models.TimeField()
@@ -98,3 +98,38 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"{self.user} — {self.unit_schedule.unit} ({self.unit_schedule.date})"
+
+
+class UnitReview(models.Model):
+    unit = models.ForeignKey(
+        Unit,
+        on_delete=models.CASCADE,
+        related_name="reviews",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="unit_reviews",
+    )
+    rating = models.PositiveSmallIntegerField(
+        validators=[
+            MinValueValidator(1),
+            MaxValueValidator(5),
+        ]
+    )
+    comments = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(rating__gte=1, rating__lte=5),
+                name="unit_review_rating_1_5",
+            ),
+            models.UniqueConstraint(
+                fields=["unit", "user"],
+                name="unique_unit_review_per_user",
+            ),
+        ]

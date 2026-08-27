@@ -18,11 +18,14 @@ from drf_spectacular.utils import (
 )
 
 from datetime import date as date_type
+from datetime import datetime
+from datetime import time
 
 from address.models import Unit
 from booking.models import (
     UnitSchedule,
-    Booking
+    Booking,
+    UnitReview
 )
 
 from booking.services import (
@@ -33,7 +36,6 @@ from booking.tasks import(
     send_confirm_email
 )
 
-from datetime import time
 
 User = get_user_model()
 
@@ -414,7 +416,7 @@ class UnitScheduleAPIView(APIView):
             ),
         ],
     )
-    def delete(self, request):
+    def delete(self, request, unit_id:int):
         input_serializer = self.InputDeleteSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
 
@@ -427,7 +429,14 @@ class UnitScheduleDetailAPIView(APIView):
     class InputUpdateSerializer(serializers.ModelSerializer):
         class Meta:
             model = UnitSchedule
-            fields = ["unit", "date", "start_time", "end_time", "is_active", "recurrence"]
+            fields = [
+                "unit", 
+                "date", 
+                "start_time", 
+                "end_time", 
+                "is_active", 
+                "recurrence"
+            ]
 
     @extend_schema(
         request=InputUpdateSerializer(),
@@ -451,106 +460,18 @@ class UnitScheduleDetailAPIView(APIView):
         description="Update (Patch) unit schedule by its pk",
         tags=["Unit Schedule"],
     )
-    def patch(self, request):
+    def patch(self, request, schedule_id:int):
         pass
 
 
 class BookingAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    class OutputListSerializer(serializers.ModelSerializer):
-        date = serializers.DateField(
-            source="unit_schedule.date",
-            read_only=True,
-        )
-        interval = serializers.SerializerMethodField()
-
-        class Meta:
-            model = Booking
-            fields = [
-                "id",
-                "date",
-                "interval",
-                "status",
-                "notes",
-                "created_at",
-            ]
-
-        def get_interval(self, obj):
-            return (
-                f"{obj.unit_schedule.start_time}"
-                f"-{obj.unit_schedule.end_time}"
-            )
-
-    @extend_schema(
-        operation_id="list_my_bookings",
-        summary="List my bookings",
-        description=(
-            "Returns all bookings belonging to the authenticated user"
-            "ordered by schedule date and start time."
-        ),
-        tags=["Booking"],
-        responses={
-            200: OpenApiResponse(
-                response=OutputListSerializer(many=True),
-                description="List of bookings for the authenticated user.",
-            ),
-            401: OpenApiResponse(
-                description="Authentication credentials were not provided.",
-            ),
-        },
-        examples=[
-            OpenApiExample(
-                name="User bookings returned",
-                value=[
-                    {
-                        "id": 42,
-                        "date": "2026-08-25",
-                        "interval": "09:00-10:30",
-                        "status": "confirmed",
-                        "notes": "Please prepare the room",
-                        "created_at": "2026-08-25T18:13:27.434515Z",
-                    },
-                    {
-                        "id": 43,
-                        "date": "2026-08-26",
-                        "interval": "14:00-15:00",
-                        "status": "pending",
-                        "notes": "",
-                        "created_at": "2026-08-25T19:00:00Z",
-                    },
-                ],
-                response_only=True,
-                status_codes=["200"],
-            ),
-        ],
-    )
-    def get(self, request):
-        bookings = (
-            Booking.objects
-            .filter(user=request.user)
-            .select_related("unit_schedule")
-            .order_by(
-                "unit_schedule__date",
-                "unit_schedule__start_time",
-            )
-        )
-
-        output_serializer = self.OutputListSerializer(
-            bookings,
-            many=True,
-        )
-
-        return Response(
-            output_serializer.data,
-            status=status.HTTP_200_OK,
-        )
+    permission_classes = [IsAuthenticated()]
 
 
     class InputCreateSerializer(serializers.ModelSerializer):
         class Meta:
             model = Booking
-            fields = ["unit_schedule", "notes"]
+            fields = ["notes"]
 
     @extend_schema(
         operation_id="create_booking",
@@ -643,16 +564,16 @@ class BookingAPIView(APIView):
             ),
         ],
     )
-    def post(self, request):
+    def post(self, request, unit_id:int):
         input_serializer = self.InputCreateSerializer(data=request.data)
         input_serializer.is_valid(raise_exception=True)
 
         user = request.user
-        unit_schedule = input_serializer.validated_data["unit_schedule"]
+        unit_schedule = get_object_or_404()
 
         if Booking.objects.filter(unit_schedule=unit_schedule, status="confirmed").exists():
             return Response(
-                {"detail": "This schedule is already booked."},
+                {"detail": "This schedule is already booked"},
                 status=status.HTTP_409_CONFLICT,
             )
 
@@ -679,10 +600,6 @@ class BookingAPIView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
-
-
-class BookingDetailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
 
 
     @extend_schema(
@@ -756,3 +673,274 @@ class BookingDetailAPIView(APIView):
         return Response(
             status=status.HTTP_204_NO_CONTENT,
         )
+
+
+class BookingsUnitListAPIView(APIView):
+    class OutputListSerializer(serializers.ModelSerializer):
+        date = serializers.DateField(
+            source="unit_schedule.date",
+            read_only=True,
+        )
+        interval = serializers.SerializerMethodField()
+
+        class Meta:
+            model = Booking
+            fields = [
+                "id",
+                "date",
+                "interval",
+                "created_at",
+                "notes"
+            ]
+
+        def get_interval(self, obj):
+            return (
+                f"{obj.unit_schedule.start_time}"
+                f"-{obj.unit_schedule.end_time}"
+            )
+
+    @extend_schema(
+        operation_id="list_unit_bookings",
+        summary="List unit bookings",
+        description=(
+            "Returns all bookings belonging to the unit"
+            "ordered by schedule date and start time."
+        ),
+        tags=["Booking"],
+        responses={
+            200: OpenApiResponse(
+                response=OutputListSerializer(many=True),
+                description="List of bookings for the unit",
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials were not provided.",
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                name="User bookings returned",
+                value=[
+                    {
+                        "id": 42,
+                        "date": "2026-08-25",
+                        "interval": "09:00-10:30",
+                        "status": "confirmed",
+                        "notes": "Please prepare the room",
+                        "created_at": "2026-08-25T18:13:27.434515Z",
+                    },
+                    {
+                        "id": 43,
+                        "date": "2026-08-26",
+                        "interval": "14:00-15:00",
+                        "status": "pending",
+                        "notes": "",
+                        "created_at": "2026-08-25T19:00:00Z",
+                    },
+                ],
+                response_only=True,
+                status_codes=["200"],
+            ),
+        ],
+    )
+    def get(self, request, unit_id:int):
+        unit = get_object_or_404(Unit, id=unit_id)
+        bookings = (
+            Booking.objects
+            .filter(unit=unit, status="confirmed")
+            .select_related("unit_schedule")
+            .order_by(
+                "unit_schedule__date",
+                "unit_schedule__start_time",
+            )
+        )
+
+        output_serializer = self.OutputListSerializer(
+            bookings,
+            many=True,
+        )
+
+        return Response(
+            output_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class BookingsUserListAPIView(APIView):
+    permission_classes = [IsAuthenticated()]
+
+    class OutputListSerializer(serializers.ModelSerializer):
+        date = serializers.DateField(
+            source="unit_schedule.date",
+            read_only=True,
+        )
+        interval = serializers.SerializerMethodField()
+
+        class Meta:
+            model = Booking
+            fields = [
+                "id",
+                "date",
+                "interval",
+                "created_at",
+            ]
+
+        def get_interval(self, obj):
+            return (
+                f"{obj.unit_schedule.start_time}"
+                f"-{obj.unit_schedule.end_time}"
+            )
+
+    @extend_schema(
+        operation_id="list_unit_bookings",
+        summary="List unit bookings",
+        description=(
+            "Returns all bookings belonging to the unit"
+            "ordered by schedule date and start time."
+        ),
+        tags=["Booking"],
+        responses={
+            200: OpenApiResponse(
+                response=OutputListSerializer(many=True),
+                description="List of bookings for the unit",
+            ),
+            401: OpenApiResponse(
+                description="Authentication credentials were not provided.",
+            ),
+        },
+        examples=[
+            OpenApiExample(
+                name="User bookings returned",
+                value=[
+                    {
+                        "id": 42,
+                        "date": "2026-08-25",
+                        "interval": "09:00-10:30",
+                        "status": "confirmed",
+                        "notes": "Please prepare the room",
+                        "created_at": "2026-08-25T18:13:27.434515Z",
+                    },
+                    {
+                        "id": 43,
+                        "date": "2026-08-26",
+                        "interval": "14:00-15:00",
+                        "status": "pending",
+                        "notes": "",
+                        "created_at": "2026-08-25T19:00:00Z",
+                    },
+                ],
+                response_only=True,
+                status_codes=["200"],
+            ),
+        ],
+    )
+    def get(self, request):
+        user = request.user
+        bookings = (
+            Booking.objects
+            .filter(user=user)
+            .select_related("unit_schedule")
+            .order_by(
+                "unit_schedule__date",
+                "unit_schedule__start_time",
+            )
+        )
+
+        output_serializer = self.OutputListSerializer(
+            bookings,
+            many=True,
+        )
+
+        return Response(
+            output_serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class UnitReviewAPIView(APIView):
+    class OutputListSerializer(serializers.ModelSerializer):
+        user_data = serializers.SerializerMethodField()
+
+        class Meta:
+            model = UnitReview
+            fields = [
+                "id",
+                "user_data",
+                "rating",
+                "comments",
+            ]
+
+        def get_user_data(self, obj):
+            return f"{obj.user.last_name} {obj.user.first_name}"
+
+    def get(self, request, unit_id: int):
+        unit = get_object_or_404(Unit, id=unit_id)
+
+        unit_reviews = (
+            UnitReview.objects
+            .filter(unit=unit)
+            .select_related("user")
+        )
+
+        serializer = self.OutputListSerializer(
+            unit_reviews,
+            many=True,
+        )
+
+        return Response(serializer.data)
+
+
+    class InputCreateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = UnitReview
+            fields = [
+                "rating",
+                "comments",
+            ]
+
+    def post(self, request, unit_id: int):
+        unit = get_object_or_404(Unit, id=unit_id)
+        user = request.user
+
+        booking = (
+            Booking.objects
+            .filter(unit=unit, user=user)
+            .select_related("unit_schedule")
+            .first()
+        )
+
+        if not booking:
+            return Response(
+                {
+                    "message": "Unit was not booked before"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        booking_end = datetime.combine(
+            booking.unit_schedule.date,
+            booking.unit_schedule.end_time,
+        )
+
+        if booking_end > datetime.now():
+            return Response(
+                {
+                    "message": "You can't leave a review before the booking ends"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        input_serializer = self.InputCreateSerializer(data=request.data)
+        input_serializer.is_valid(raise_exception=True)
+
+        input_serializer.save(
+            unit=unit,
+            user=user,
+        )
+
+        return Response(
+            {
+                "message": "Thanks for your review!"
+            },
+            status=status.HTTP_201_CREATED,
+        )
+        
