@@ -11,9 +11,15 @@ User = get_user_model()
 
 class Country(models.Model):
     iso_code = models.CharField(
-        max_length=3, 
-        unique=True, 
-        help_text="ISO 3166-1 alpha-3 code (USA, RUS, etc.)"
+        max_length=3,
+        unique=True,
+        validators=[
+            RegexValidator(
+                regex=r"^[A-Z]{3}$",
+                message="ISO code must contain exactly three uppercase letters",
+            )
+        ],
+        help_text="ISO 3166-1 alpha-3 code (USA, RUS, etc)",
     )
     name = models.CharField(max_length=255, unique=True)
 
@@ -21,6 +27,14 @@ class Country(models.Model):
         ordering = ["name"]
         verbose_name = "country"
         verbose_name_plural = "countries"
+
+    def clean(self):
+        super().clean()
+        self.iso_code = self.iso_code.strip().upper()
+
+    def save(self, *args, **kwargs):
+        self.iso_code = self.iso_code.strip().upper()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -37,11 +51,15 @@ class Region(models.Model):
         max_length=20,
         validators=[
             RegexValidator(
-                regex=r"^[A-Z0-9-]+$",
-                message="Use uppercase letters, digits, and hyphens only.",
+                regex=r"^[A-Za-z0-9-]+$",
+                message="Use letters, digits, and hyphens only",
             ),
         ],
-        help_text="Region code in 'AAA-XX' form, where AAA-country code, XX-region letter or digit code"
+        help_text=(
+            "Region code in 'AAA-XX' form, where "
+            "AAA is the countryISO code and "
+            "XX is a region letter or digit code"
+        ),
     )
 
     class Meta:
@@ -59,8 +77,12 @@ class Region(models.Model):
             ),
         ]
 
+    def save(self, *args, **kwargs):
+        self.code = f"{self.country.iso_code}-{self.code.strip().upper()}"
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.name}, {self.country.iso_code}"
+        return f"{self.name}, {self.code}"
 
 
 class SettlementType(models.Model):
@@ -144,7 +166,7 @@ class Street(models.Model):
     street_code = models.CharField(
         max_length=50,
         blank=True,
-        help_text="official or external street identifie",
+        help_text="official or external street identifier",
     )
     street_type = models.ForeignKey(
         StreetType,
@@ -165,6 +187,10 @@ class Street(models.Model):
             models.UniqueConstraint(
                 fields=["name", "district"],
                 name="unique_street_name_per_district",
+            ),
+            models.UniqueConstraint(
+                fields=["street_code", "district"],
+                name="unique_street_code_per_district",
             ),
         ]
 
@@ -308,7 +334,7 @@ class Floor(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["building", "label"],
-                name="unique_floor_number_per_building",
+                name="unique_floor_label_per_building",
             ),
         ]
 

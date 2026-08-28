@@ -465,7 +465,7 @@ class UnitScheduleDetailAPIView(APIView):
 
 
 class BookingAPIView(APIView):
-    permission_classes = [IsAuthenticated()]
+    permission_classes = [IsAuthenticated]
 
 
     class InputCreateSerializer(serializers.ModelSerializer):
@@ -766,7 +766,7 @@ class BookingsUnitListAPIView(APIView):
 
 
 class BookingsUserListAPIView(APIView):
-    permission_classes = [IsAuthenticated()]
+    permission_classes = [IsAuthenticated]
 
     class OutputListSerializer(serializers.ModelSerializer):
         date = serializers.DateField(
