@@ -1,6 +1,6 @@
 from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from rest_framework import serializers, status
 from rest_framework.views import APIView
@@ -259,17 +259,32 @@ class RegionAPIView(APIView):
     )
     def get(self, request, country_id:int):
         country = get_object_or_404(Country, id=country_id)
-
         regions = Region.objects.filter(country=country)
 
-        output_serializer = self.OutputListSerializer(regions, many=True)
-        return Response(output_serializer.data, status=status.HTTP_200_OK)
+        output_serializer = self.OutputListSerializer(
+            regions, 
+            many=True
+        )
+
+        return Response(
+            output_serializer.data, 
+            status=status.HTTP_200_OK
+        )
 
 
     class InputCreateSerializer(serializers.Serializer):
-        country_id = serializers.IntegerField()
-        regions = serializers.ListField(
-            allow_empty=False,
+        class RegionSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = Region
+                fields = [
+                    "country",
+                    "name",
+                    "code"
+                ]
+
+        regions = RegionSerializer(
+            allow_empty = False,
+            many = True
         )
 
     @extend_schema(
@@ -291,11 +306,10 @@ class RegionAPIView(APIView):
         ],
         tags=["Regions"],
     )
-    def post(self, request):
+    def post(self, request, country_id: int):
         serializer = self.InputCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        country_id = serializer.validated_data["country_id"]
         country = get_object_or_404(Country, id=country_id)
 
         regions_data = serializer.validated_data["regions"]
@@ -347,21 +361,17 @@ class RegionAPIView(APIView):
         description="Delete several regions by its pk",
         tags=["Regions"],
     )
-    def delete(self, request):
+    def delete(self, request, country_id: int):
         serializer = self.InputDeleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         Region.objects.filter(id__in=serializer.validated_data["regions_id"]).delete()
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RegionDetailAPIView(APIView):
-    SAFE_METHODS = ["GET"]
-
-    def get_permissions(self):
-        if self.request.method not in self.SAFE_METHODS:
-            return [IsAdminUser()]
-        return [AllowAny()]
+    permission_classes = [IsAdminUser]
 
 
     class InputSerializer(serializers.ModelSerializer):
@@ -387,12 +397,42 @@ class RegionDetailAPIView(APIView):
         tags=["Regions"],
     )
     def patch(self, request, region_id: int):
-        region = get_object_or_404(Region, id=region_id)
+        region = get_object_or_404(
+            Region,
+            id=region_id,
+        )
 
-        serializer = self.InputSerializer(region, data=request.data, partial=True)
-        serializer.is_valid()
-        serializer.save()
-        return Response(status=status.HTTP_200_OK)
+        serializer = self.InputSerializer(
+            region,
+            data=request.data,
+            partial=True,
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            with transaction.atomic():
+                region = serializer.save()
+        except IntegrityError:
+            return Response(
+                {
+                    "detail": (
+                        "A region with this name or code "
+                        "already exists in this country."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "id": region.pk,
+                "country": region.country_id,
+                "name": region.name,
+                "code": region.code,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class SettlementTypesAPIView(APIView):

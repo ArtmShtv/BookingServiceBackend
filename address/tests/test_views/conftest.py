@@ -44,6 +44,25 @@ def region_data(country_data):
         code="REG1",
     )
 
+@pytest.fixture
+def regions_data(country_data):
+    region_1 = Region.objects.create(
+        country=country_data,
+        name="Region 1",
+        code="REG1",
+    )
+    region_2 = Region.objects.create(
+        country=country_data,
+        name="Region 2",
+        code="REG2",
+    )
+    region_3 = Region.objects.create(
+        country=country_data,
+        name="Region 3",
+        code="REG3",
+    )
+    return region_1, region_2, region_3
+
 
 @pytest.fixture
 def settlement_type_city_data():

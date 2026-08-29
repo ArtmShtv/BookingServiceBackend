@@ -18,7 +18,7 @@ urlpatterns = [
     path(
         "country/<int:country_id>/region/",
         views.RegionAPIView.as_view(),
-        name="region",
+        name="regions",
     ),
     path(
         "region/<int:region_id>/",

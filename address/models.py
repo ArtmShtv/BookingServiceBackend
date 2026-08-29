@@ -78,7 +78,14 @@ class Region(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        self.code = f"{self.country.iso_code}-{self.code.strip().upper()}"
+        prefix = f"{self.country.iso_code}-"
+        normalized_code = self.code.strip().upper()
+
+        if not normalized_code.startswith(prefix):
+            normalized_code = f"{prefix}{normalized_code}"
+
+        self.code = normalized_code
+
         super().save(*args, **kwargs)
 
     def __str__(self):
