@@ -1,3 +1,4 @@
+from django.db.models import ProtectedError
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 
@@ -5,6 +6,7 @@ from rest_framework import serializers, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser, AllowAny
+from rest_framework.validators import UniqueValidator
 
 from drf_spectacular.utils import (
     extend_schema, 
@@ -30,12 +32,13 @@ from address.models import (
 
 
 class CountryAPIView(APIView):
-    SAFE_METHODS = "GET"
+    SAFE_METHODS = ("GET")
 
     def get_permissions(self):
         if self.request.method not in self.SAFE_METHODS:
             return [IsAdminUser()]
         return [AllowAny()]
+
 
     class OutputListSerializer(serializers.ModelSerializer):
         class Meta:
@@ -67,6 +70,7 @@ class CountryAPIView(APIView):
         countries = Country.objects.all()
         serializer = self.OutputListSerializer(countries, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
 
     class InputCreateSerializer(serializers.ModelSerializer):
         class Meta:
@@ -119,17 +123,22 @@ class CountryAPIView(APIView):
             seen_names = set()
 
             for item in validated_data:
-                iso = item["iso_code"]
-                name = item["name"]
+                iso_code = item["iso_code"].strip().upper()
+                name = item["name"].strip()
 
                 if (
-                    iso not in existing_iso_codes
-                    and iso not in seen_iso_codes
+                    iso_code not in existing_iso_codes
+                    and iso_code not in seen_iso_codes
                     and name not in existing_names
                     and name not in seen_names
                 ):
-                    to_create.append(Country(**item))
-                    seen_iso_codes.add(iso)
+                    to_create.append(
+                        Country(
+                            iso_code = iso_code,
+                            name = name
+                        )
+                    )
+                    seen_iso_codes.add(iso_code)
                     seen_names.add(name)
 
             with transaction.atomic():
@@ -140,17 +149,22 @@ class CountryAPIView(APIView):
 
 
 class CountryDetailAPIView(APIView):
-    SAFE_METHODS = ("GET")
-
-    def get_permissions(self):
-        if self.request.method in self.SAFE_METHODS:
-            return [IsAdminUser()]
-        return [AllowAny()]
+    permission_classes = [IsAdminUser]
 
     class InputUpdateSerializer(serializers.ModelSerializer):
         class Meta:
             model = Country
             fields = ["iso_code", "name"]
+
+        def to_internal_value(self, data):
+            data = data.copy()
+
+            if "iso_code" in data:
+                data["iso_code"] = data["iso_code"].strip().upper()
+            if "name" in data:
+                data["name"] = data["name"].strip()
+
+            return super().to_internal_value(data)
 
     @extend_schema(
         request=InputUpdateSerializer(),
@@ -192,7 +206,18 @@ class CountryDetailAPIView(APIView):
     def delete(self, request, country_id: int):
         country = get_object_or_404(Country, pk=country_id)
 
-        country.delete()
+        try:
+            country.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Country cannot be deleted because "
+                        "it has related regions."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 

@@ -5,9 +5,9 @@ from address import views
 
 urlpatterns = [
     # Country enpoints
-    path("country/", 
+    path("countries/", 
         views.CountryAPIView.as_view(), 
-        name="country"
+        name="countries"
     ),
     path(
         "country/<int:country_id>/",
